@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>我的骰子陷阱遊戲</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>骰子陷阱 HTML 版</h1>
+
+    <div class="game-container">
+        <div id="game-board">
+            </div>
+
+        <div id="game-info">
+            <h2>遊戲資訊</h2>
+            <p>目前回合: <span id="turn-count">0</span></p>
+            <p>輪到玩家: <span id="current-player-display">-</span></p>
+            <p>骰子結果: <span id="dice-result-display">-</span></p>
+            <button id="roll-dice-button">擲骰子</button>
+            <button id="reset-game-button">重新開始</button>
+        </div>
+    </div>
+
+    <div id="player-status-area">
+        <h2>玩家狀態</h2>
+        </div>
+
+    <div id="message-log-area">
+        <h2>遊戲訊息</h2>
+        <ul id="message-list">
+            </ul>
+    </div>
+
+    <div id="ranking-area">
+        <h2>排行榜</h2>
+        <ol id="ranking-list">
+            </ol>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

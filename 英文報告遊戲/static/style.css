@@ -1,0 +1,61 @@
+body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+.game-container { display: flex; gap: 20px; margin-bottom: 20px; }
+#game-board {
+    display: grid;
+    /* grid-template-columns 會由 JS 設定，例如 repeat(15, 40px); */
+    border: 2px solid #333;
+    width: fit-content; /* 讓寬度自適應格子數量 */
+    background-color: #e0e0e0;
+}
+.board-square {
+    width: 40px; /* 格子寬度 */
+    height: 40px; /* 格子高度 */
+    border: 1px solid #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative; /* 為了棋子和陷阱的定位 */
+    font-size: 0.7em; /* 格子編號字體大小 */
+    box-sizing: border-box;
+    background-color: #fff;
+}
+.player-piece {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    position: absolute; /* 或者在格子內用 flex 排列 */
+    font-size: 0.6em;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* JS 會為不同玩家設定不同顏色和位置 */
+}
+.player-1 { background-color: dodgerblue; }/* 為不同玩家棋子設定顏色 */
+.player-2 { background-color: crimson; }
+.player-3 { background-color: forestgreen; }
+.player-4 { background-color: #ffd700; }
+.player-5 { background-color: saddlebrown; }
+.player-6 { background-color: darkorchid; }
+.player-7 { background-color: darkturquoise; }
+
+
+
+.trap-indicator {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5); /* 半透明黑色標示陷阱 */
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 1.2em;
+}
+#game-info button { padding: 8px 15px; margin-top: 10px; cursor: pointer; }
+#player-status-area, #message-log-area, #ranking-area {
+    margin-top: 20px; padding: 10px; border: 1px solid #ddd; background-color: #fff;
+}
+#message-log-area ul { list-style-type: none; padding-left: 0; max-height: 150px; overflow-y: auto;}
+#message-log-area li { padding: 2px 0; border-bottom: 1px dashed #eee; }
