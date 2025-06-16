@@ -1,241 +1,396 @@
-// 等待 HTML 文件完全載入後執行
-document.addEventListener('DOMContentLoaded', function() {
-    const gameBoard = document.getElementById('game-board');
-    const turnCountDisplay = document.getElementById('turn-count');
-    const currentPlayerDisplay = document.getElementById('current-player-display');
-    const playerSelectorDropdown = document.getElementById('player-selector-dropdown');
-    const diceResultDisplay = document.getElementById('dice-result-display');
-    const rollDiceButton = document.getElementById('roll-dice-button');
-    const resetGameButton = document.getElementById('reset-game-button');
-    const playerStatusArea = document.getElementById('player-status-area');
-    const messageList = document.getElementById('message-list');
-    const rankingList = document.getElementById('ranking-list');
+// 等待 DOM 完全載入
+document.addEventListener('DOMContentLoaded', () => {
+    // 獲取 DOM 元素
+    const playerInfoModal = document.getElementById('player-info-modal');
+    const playerIdElement = document.getElementById('player-id');
+    const playerNameInput = document.getElementById('player-name-input');
+    const joinGameBtn = document.getElementById('join-game-btn');
+    const playerInfo = document.getElementById('player-info');
+    const playerList = document.getElementById('player-list');
+    const gamePath = document.getElementById('game-path');
+    const messageLog = document.getElementById('message-log');
+    const rollDiceBtn = document.getElementById('roll-dice-btn');
+    const resetGameBtn = document.getElementById('reset-game-btn');
+    const resetRequestSection = document.getElementById('reset-request-section');
+    const agreeResetBtn = document.getElementById('agree-reset-btn');
+    const disagreeResetBtn = document.getElementById('disagree-reset-btn');
 
-    const PATH_LENGTH_FROM_JS = 15; // 與後端設定一致
+    // 遊戲狀態變數
+    let playerId = null;
+    let joinStep = 0;
+    let resetAgreed = false;
+    let resetDisagreed = false;
+    let lastCurrentPlayerId = null;
+    let lastGameState = null;
 
-    // 函數：獲取並更新遊戲狀態
-    async function fetchAndUpdateState() {
+    // 加入遊戲按鈕點擊事件
+    joinGameBtn.addEventListener('click', async () => {
         try {
-            const response = await fetch('/get_state'); // 向後端請求狀態
-            if (!response.ok) throw new Error('Failed to fetch game state');
-            const state = await response.json();
+            switch (joinStep) {
+                case 0: // 加入遊戲
+                    const joinResponse = await fetch('/join_game', {
+                        method: 'POST'
+                    });
+                    const joinData = await joinResponse.json();
+                    console.log('加入遊戲回應:', joinData);
+                    if (joinData.player_id) {
+                        playerId = joinData.player_id;
+                        playerIdElement.textContent = `玩家 ID: ${playerId}`;
+                        playerNameInput.disabled = false;
+                        joinGameBtn.textContent = '確認名稱';
+                        joinStep = 1;
+                        updateGameState();
+                    }
+                    break;
 
-            console.log('Received game state:', state); // 添加除錯訊息
+                case 1: // 確認名稱
+                    if (playerNameInput.value.trim()) {
+                        const nameResponse = await fetch('/set_player_name', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                player_id: playerId,
+                                name: playerNameInput.value.trim()
+                            })
+                        });
+                        const nameData = await nameResponse.json();
+                        console.log('設定名稱回應:', nameData);
+                        if (nameData.players && nameData.players[playerId]) {
+                            playerNameInput.disabled = true;
+                            joinGameBtn.textContent = '準備';
+                            joinStep = 2;
+                            updateGameStateUI(nameData);
+                        }
+                    }
+                    break;
 
-            updateBoard(state.players, state.traps);
-            updateGameInfo(state.turn_count, state.current_player_id, state.last_dice_roll);
-            updatePlayerStatus(state.players);
-            updateMessageLog(state.message_log);
-            updateRanking(state.finished_players_ranked, state.players);
-            updatePlayerSelector(state.players, state.game_over); // 確保這行被執行
+                case 2: // 準備
+                    const readyResponse = await fetch('/set_ready', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            player_id: playerId
+                        })
+                    });
+                    const readyData = await readyResponse.json();
+                    console.log('準備回應:', readyData);
+                    if (readyData.players && readyData.players[playerId]) {
+                        joinGameBtn.textContent = '取消準備';
+                        joinStep = 3;
+                        updateGameStateUI(readyData);
+                    }
+                    break;
 
-            if (state.game_over) {
-                rollDiceButton.disabled = true;
-                currentPlayerDisplay.textContent = "遊戲結束！";
-            } else {
-                rollDiceButton.disabled = false;
+                case 3: // 取消準備
+                    const cancelResponse = await fetch('/set_ready', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            player_id: playerId
+                        })
+                    });
+                    const cancelData = await cancelResponse.json();
+                    console.log('取消準備回應:', cancelData);
+                    if (cancelData.players && cancelData.players[playerId]) {
+                        joinGameBtn.textContent = '準備';
+                        joinStep = 2;
+                        updateGameStateUI(cancelData);
+                    }
+                    break;
             }
-
         } catch (error) {
-            console.error("Error fetching state:", error);
-            messageList.innerHTML = `<li>載入遊戲狀態失敗: ${error.message}</li>`;
+            console.error('操作失敗:', error);
         }
-    }
+    });
 
-    // 函數：更新遊戲棋盤顯示
-    function updateBoard(players, traps) {
-        gameBoard.innerHTML = ''; // 清空舊棋盤
-        // 設定棋盤格子欄數，讓它能正確排列
-        gameBoard.style.gridTemplateColumns = `repeat(${PATH_LENGTH_FROM_JS}, 40px)`;
-
-
-        for (let i = 0; i < PATH_LENGTH_FROM_JS; i++) {
-            const square = document.createElement('div');
-            square.classList.add('board-square');
-            square.textContent = i; // 顯示格子編號
-
-            // 顯示陷阱
-            if (traps.includes(i)) { // 假設 traps 是一個包含位置的陣列或集合
-                const trapDiv = document.createElement('div');
-                trapDiv.classList.add('trap-indicator');
-                trapDiv.textContent = 'T';
-                square.appendChild(trapDiv);
-            }
-
-            // 顯示玩家棋子 (這裡需要更細緻的處理，例如多個玩家在同一格)
-            Object.entries(players).forEach(([playerId, playerData]) => {
-                if (playerData.position === i) {
-                    const piece = document.createElement('div');
-                    piece.classList.add('player-piece', `player-${playerId}`);
-                    piece.textContent = playerId;
-                    // 為了避免棋子重疊，你可能需要調整 CSS 或用更複雜的定位
-                    // 簡單處理：稍微錯開
-                    const numPlayersOnSquare = Object.values(players).filter(p => p.position === i).length;
-                    const playerIndexOnSquare = Object.keys(players).filter(pid => players[pid].position === i).indexOf(playerId);
-                    piece.style.left = `${5 + playerIndexOnSquare * 5}px`; // 簡易錯位
-                    piece.style.top = `${5 + playerIndexOnSquare * 2}px`;
-                    square.appendChild(piece);
-                }
-            });
-            gameBoard.appendChild(square);
-        }
-    }
-
-    // 函數：更新一般遊戲資訊
-    function updateGameInfo(turn, currentPlayerId, diceResult) {
-        turnCountDisplay.textContent = turn;
-        currentPlayerDisplay.textContent = currentPlayerId !== null ? `玩家 ${currentPlayerId}` : '-';
-        diceResultDisplay.textContent = diceResult !== null ? diceResult : '-';
-    }
-
-    // 函數：更新玩家狀態區域
-    function updatePlayerStatus(players) {
-        playerStatusArea.innerHTML = '<h2>玩家狀態</h2>'; // 清空舊內容並加回標題
-        Object.entries(players).forEach(([playerId, data]) => {
-            const p = document.createElement('p');
-            let status = `玩家 ${playerId}: 位置 ${data.position}, 生命 ${data.lives}`;
-            if (data.finished) {
-                status += ` (已於第 ${data.finish_turn} 回合完成)`;
-            }
-            p.textContent = status;
-            playerStatusArea.appendChild(p);
-        });
-    }
-
-    // 函數：更新遊戲訊息紀錄
-    function updateMessageLog(messages) {
-        messageList.innerHTML = ''; // 清空舊訊息
-        messages.forEach(msg => {
-            const li = document.createElement('li');
-            li.textContent = msg;
-            messageList.appendChild(li);
-        });
-        messageList.scrollTop = messageList.scrollHeight; // 自動滾動到底部
-    }
-
-    // 函數：更新排行榜
-    function updateRanking(rankedIds, playersData) {
-        rankingList.innerHTML = ''; // 清空舊排名
-        rankedIds.forEach((playerId, index) => {
-            const li = document.createElement('li');
-            const player = playersData[playerId];
-            li.textContent = `第 ${index + 1} 名: 玩家 ${playerId} (回合 ${player.finish_turn}, 生命 ${player.lives})`;
-            rankingList.appendChild(li);
-        });
-    }
-    //函數：下拉選單更新玩家選擇器
-    function updatePlayerSelector(playersData, gameIsOver) {
-        console.log('Updating player selector with:', playersData); // 添加除錯訊息
-        playerSelectorDropdown.innerHTML = ''; // 清空舊選項
-
-        if (gameIsOver) {
-            playerSelectorDropdown.disabled = true;
-            rollDiceButton.disabled = true; // 遊戲結束時禁用擲骰按鈕
-            return;
-        }
-
-        // 添加一個預設選項
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = '請選擇玩家';
-        playerSelectorDropdown.appendChild(defaultOption);
-
-        let hasActivePlayers = false;
-        Object.entries(playersData).forEach(([playerId, playerData]) => {
-            console.log('Processing player:', playerId, playerData); // 添加除錯訊息
-            // 只顯示未完成且生命值大於 0 的玩家
-            if (!playerData.finished && playerData.lives > 0) {
-                const option = document.createElement('option');
-                option.value = playerId;
-                option.textContent = `玩家 ${playerId} (生命: ${playerData.lives})`;
-                playerSelectorDropdown.appendChild(option);
-                hasActivePlayers = true;
-            }
-        });
-
-        console.log('Has active players:', hasActivePlayers); // 添加除錯訊息
-        playerSelectorDropdown.disabled = !hasActivePlayers; // 如果沒有活躍玩家，也禁用選擇器
-        rollDiceButton.disabled = !hasActivePlayers; // 同時禁用擲骰按鈕
-    }
-
-    // 統一更新 UI 的函數
-    function updateUI(state) {
-        updateBoard(state.players, state.traps);
-        updateGameInfo(state.turn_count, state.current_player_id, state.last_dice_roll);
-        updatePlayerStatus(state.players);
-        updateMessageLog(state.message_log);
-        updateRanking(state.finished_players_ranked, state.players);
-        updatePlayerSelector(state.players, state.game_over); // 更新玩家選擇器
-
-        if (state.game_over) {
-            rollDiceButton.disabled = true;
-            currentPlayerDisplay.textContent = "遊戲結束！";
-            setTimeout(()=> alert("遊戲結束！請查看排行榜。"), 100);
-        } else {
-            rollDiceButton.disabled = false;
-        }
-    }
-
-    // 事件監聽：點擊擲骰子按鈕
-    rollDiceButton.addEventListener('click', async function() {
-        const selectedPlayerId = playerSelectorDropdown.value; // 從下拉選單獲取選中的玩家 ID
-
-        if (!selectedPlayerId) { // 以防萬一沒有選中任何玩家
-            alert("請選擇一位玩家！(Please select a player!)");
-            return;
-        }
-
-        diceResultDisplay.textContent = "擲骰中...";
+    // 擲骰子按鈕點擊事件
+    rollDiceBtn.addEventListener('click', async () => {
         try {
             const response = await fetch('/roll_dice', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ player_id: parseInt(selectedPlayerId) })
+                body: JSON.stringify({
+                    player_id: playerId
+                })
             });
-
-            if (!response.ok) {
-                 const errorData = await response.json().catch(() => ({ message: '擲骰失敗，且無法解析錯誤回應。' }));
-                 throw new Error(errorData.message || '擲骰動作失敗 (Roll dice action failed)');
+            const data = await response.json();
+            if (data.success) {
+                updateGameState();
             }
-            const state = await response.json();
-            updateUI(state);
         } catch (error) {
-            console.error("Error rolling dice:", error);
-            const li = document.createElement('li');
-            li.textContent = error.message;
-            li.style.color = 'red';
-            messageList.appendChild(li);
-            messageList.scrollTop = messageList.scrollHeight;
+            console.error('擲骰子失敗:', error);
         }
     });
 
-    // 添加玩家選擇器的變更事件監聽器
-    playerSelectorDropdown.addEventListener('change', function() {
-        const selectedPlayerId = this.value;
-        if (selectedPlayerId) {
-            currentPlayerDisplay.textContent = `玩家 ${selectedPlayerId}`;
-        } else {
-            currentPlayerDisplay.textContent = '-';
+    // 重置遊戲按鈕點擊事件
+    resetGameBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/request_reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    player_id: playerId
+                })
+            });
+            const data = await response.json();
+            if (data.success) {
+                resetAgreed = false;
+                resetDisagreed = false;
+                updateGameState();
+            }
+        } catch (error) {
+            console.error('請求重置遊戲失敗:', error);
         }
     });
 
-    // 事件監聽：點擊重新開始按鈕
-    resetGameButton.addEventListener('click', async function() {
-        if (confirm("確定要重新開始遊戲嗎？")) {
-            try {
-                const response = await fetch('/reset', { method: 'POST' });
-                if (!response.ok) throw new Error('Reset game action failed');
-                const state = await response.json();
-                updateUI(state);
+    // 同意重置按鈕點擊事件
+    agreeResetBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/agree_reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    player_id: playerId,
+                    agree: true
+                })
+            });
+            const data = await response.json();
+            if (data.success) {
+                resetAgreed = true;
+                resetRequestSection.style.display = 'none';
+                updateGameState();
+            }
             } catch (error) {
-                console.error("Error resetting game:", error);
-                messageList.innerHTML = `<li>重置遊戲失敗: ${error.message}</li>`;
+            console.error('同意重置失敗:', error);
+        }
+    });
+
+    // 不同意重置按鈕點擊事件
+    disagreeResetBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/agree_reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    player_id: playerId,
+                    agree: false
+                })
+            });
+            const data = await response.json();
+            if (data.success) {
+                resetDisagreed = true;
+                resetRequestSection.style.display = 'none';
+                updateGameState();
+            }
+        } catch (error) {
+            console.error('不同意重置失敗:', error);
+        }
+    });
+
+    // 更新遊戲狀態
+    async function updateGameState() {
+        if (!playerId) {
+            return; // 如果玩家還沒加入遊戲，不更新狀態
+        }
+        try {
+            const response = await fetch('/get_state');
+            const gameData = await response.json();
+            console.log('收到遊戲狀態:', gameData); // 添加日誌
+            if (gameData) { // 移除 success 檢查，因為後端可能沒有這個字段
+                updateGameStateUI(gameData);
+            }
+        } catch (error) {
+            console.error('更新遊戲狀態失敗:', error);
+        }
+    }
+
+    // 播放陷阱音效
+    function playTrapSound() {
+        try {
+            const audio = new Audio('/static/xm3522.wav');
+            audio.volume = 0.5; // 設置音量為 50%
+            const playPromise = audio.play();
+            
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    console.log('陷阱音效開始播放');
+                }).catch(error => {
+                    console.error('播放陷阱音效失敗:', error);
+                });
+            }
+        } catch (error) {
+            console.error('創建陷阱音效失敗:', error);
+        }
+    }
+
+    // 更新遊戲狀態 UI
+    function updateGameStateUI(gameData) {
+        console.log('更新 UI，遊戲數據:', gameData); // 添加日誌
+
+        // 更新玩家列表
+        playerList.innerHTML = '';
+        if (gameData.players) {
+            Object.entries(gameData.players).forEach(([pid, player]) => {
+                const li = document.createElement('li');
+                li.textContent = `${player.name || `玩家 ${pid}`}${player.is_ready ? ' (已準備)' : ''}${pid === gameData.current_player_id ? ' (當前回合)' : ''}`;
+                playerList.appendChild(li);
+            });
+        }
+
+        // 更新遊戲路徑
+        gamePath.innerHTML = '';
+        if (gameData.path_length) {
+            for (let i = 0; i < gameData.path_length; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'path-cell';
+                if (gameData.traps && gameData.traps.includes(i)) {
+                    cell.classList.add('trap');
+                }
+                if (gameData.players) {
+                    Object.entries(gameData.players).forEach(([pid, player]) => {
+                        if (player.position === i) {
+                            const piece = document.createElement('div');
+                            piece.className = 'player-piece';
+                            piece.textContent = pid;
+                            cell.appendChild(piece);
+                        }
+                    });
+                }
+                if (i === gameData.current_position) {
+                    cell.classList.add('current-position');
+                }
+                if (i === gameData.current_position && playerId === gameData.current_player_id) {
+                    playTrapSound();
+                }
+                gamePath.appendChild(cell);
             }
         }
-    });
 
-    // 頁面初次載入時，獲取一次遊戲狀態
-    fetchAndUpdateState();
+        // 更新訊息日誌
+        messageLog.innerHTML = '';
+        if (gameData.message_log) {
+            gameData.message_log.slice(-10).forEach(msg => {
+                const li = document.createElement('li');
+                li.textContent = msg;
+                messageLog.appendChild(li);
+            });
+        }
+
+        // 更新按鈕狀態
+        const isCurrentPlayer = gameData.current_player_id === playerId;
+        const isGameStarted = gameData.game_started;
+        const isGameOver = gameData.game_over;
+        const isPlayerFinished = gameData.players && gameData.players[playerId]?.finished;
+
+        if (isGameOver) {
+            rollDiceBtn.disabled = true;
+            rollDiceBtn.title = '遊戲已結束';
+        } else if (isPlayerFinished) {
+            rollDiceBtn.disabled = true;
+            rollDiceBtn.title = '您已完成遊戲';
+        } else if (!isGameStarted) {
+            rollDiceBtn.disabled = true;
+            rollDiceBtn.title = '等待遊戲開始';
+        } else if (!isCurrentPlayer) {
+            rollDiceBtn.disabled = true;
+            rollDiceBtn.title = '等待其他玩家回合';
+        } else {
+            rollDiceBtn.disabled = false;
+            rollDiceBtn.title = '擲骰子';
+        }
+
+        // 更新重置請求區域
+        if (gameData.reset_requested && !resetAgreed && !resetDisagreed) {
+            resetRequestSection.style.display = 'block';
+        } else {
+            resetRequestSection.style.display = 'none';
+        }
+
+        // 更新玩家資訊區域
+        if (gameData.players && gameData.players[playerId]) {
+            const player = gameData.players[playerId];
+            playerInfo.innerHTML = `
+                <p>玩家 ID: ${playerId}</p>
+                <p>名稱: ${player.name || '未設定'}</p>
+                <p>位置: ${player.position}</p>
+                <p>生命值: ${player.lives}</p>
+                <p>狀態: ${player.finished ? '已完成' : (player.is_ready ? '已準備' : '未準備')}</p>
+            `;
+        }
+
+        // 更新彈窗顯示狀態
+        if (isGameStarted) {
+            document.body.classList.add('game-started');
+            playerInfoModal.classList.add('hidden');
+        } else {
+            document.body.classList.remove('game-started');
+            playerInfoModal.classList.remove('hidden');
+        }
+    }
+
+    // 播放回合音效
+    function playTurnSound() {
+        try {
+            const audio = new Audio('/static/y1249.wav');
+            audio.volume = 0.5; // 設置音量為 50%
+            const playPromise = audio.play();
+            
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    console.log('音效開始播放');
+                }).catch(error => {
+                    console.error('播放音效失敗:', error);
+                });
+            }
+        } catch (error) {
+            console.error('創建音效失敗:', error);
+        }
+    }
+
+    // 檢查當前玩家
+    async function checkCurrentPlayer() {
+        if (!playerId) {
+            return; // 如果玩家還沒加入遊戲，不檢查當前玩家
+        }
+        try {
+            const response = await fetch('/get_current_player');
+            const data = await response.json();
+            console.log('當前玩家檢查:', data); // 添加日誌
+            if (data.current_player_id !== lastCurrentPlayerId) {
+                lastCurrentPlayerId = data.current_player_id;
+                if (data.current_player_id === playerId) {
+                    console.log('輪到當前玩家，播放音效');
+                    playTurnSound();
+                }
+                updateGameState();
+            }
+        } catch (error) {
+            console.error('檢查當前玩家失敗:', error);
+        }
+    }
+
+    // 開始遊戲循環
+    function startGameLoop() {
+        // 每秒檢查一次當前玩家
+        setInterval(checkCurrentPlayer, 1000);
+        // 每秒更新一次遊戲狀態
+        setInterval(updateGameState, 1000);
+    }
+
+    // 初始化
+    startGameLoop();
 });

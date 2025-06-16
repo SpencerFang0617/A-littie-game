@@ -1,61 +1,187 @@
-body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-.game-container { display: flex; gap: 20px; margin-bottom: 20px; }
-#game-board {
-    display: grid;
-    /* grid-template-columns 會由 JS 設定，例如 repeat(15, 40px); */
-    border: 2px solid #333;
-    width: fit-content; /* 讓寬度自適應格子數量 */
-    background-color: #e0e0e0;
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f0f0;
 }
-.board-square {
-    width: 40px; /* 格子寬度 */
-    height: 40px; /* 格子高度 */
+
+.game-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+}
+
+.player-info {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.game-board {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.controls {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.message-log {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    height: 400px;
+    overflow-y: auto;
+}
+
+.player-list {
+    list-style: none;
+    padding: 0;
+}
+
+.player-list li {
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.game-path {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 5px;
+    margin: 20px 0;
+    width: 100%;
+    max-width: 800px;
+}
+
+.path-cell {
+    width: 40px;
+    height: 40px;
     border: 1px solid #ccc;
     display: flex;
     align-items: center;
     justify-content: center;
-    position: relative; /* 為了棋子和陷阱的定位 */
-    font-size: 0.7em; /* 格子編號字體大小 */
-    box-sizing: border-box;
-    background-color: #fff;
+    position: relative;
 }
+
+.trap {
+    background-color: #ffebee;
+}
+
 .player-piece {
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-    position: absolute; /* 或者在格子內用 flex 排列 */
-    font-size: 0.6em;
+    width: 20px;
+    height: 20px;
+    background-color: #2196F3;
     color: white;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    /* JS 會為不同玩家設定不同顏色和位置 */
-}
-.player-1 { background-color: dodgerblue; }/* 為不同玩家棋子設定顏色 */
-.player-2 { background-color: crimson; }
-.player-3 { background-color: forestgreen; }
-.player-4 { background-color: #ffd700; }
-.player-5 { background-color: saddlebrown; }
-.player-6 { background-color: darkorchid; }
-.player-7 { background-color: darkturquoise; }
-
-
-
-.trap-indicator {
+    font-size: 12px;
     position: absolute;
+}
+
+button {
+    padding: 8px 16px;
+    margin: 5px;
+    border: none;
+    border-radius: 4px;
+    background-color: #2196F3;
+    color: white;
+    cursor: pointer;
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+input {
+    padding: 8px;
+    margin: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#reset-request-section {
+    display: none;
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #fff3e0;
+    border-radius: 4px;
+}
+
+h2 {
+    margin-top: 0;
+    color: #333;
+}
+
+#message-log ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#message-log li {
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+}
+
+#player-info p {
+    margin: 5px 0;
+    padding: 5px;
+    background-color: #f8f8f8;
+    border-radius: 4px;
+}
+
+#player-info p:first-child {
+    margin-top: 0;
+}
+
+#player-info p:last-child {
+    margin-bottom: 0;
+}
+
+/* 彈窗樣式 */
+.modal {
+    display: block;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.5); /* 半透明黑色標示陷阱 */
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 1.2em;
+    background-color: rgba(0, 0, 0, 0.5);
 }
-#game-info button { padding: 8px 15px; margin-top: 10px; cursor: pointer; }
-#player-status-area, #message-log-area, #ranking-area {
-    margin-top: 20px; padding: 10px; border: 1px solid #ddd; background-color: #fff;
+
+.modal-content {
+    background-color: white;
+    margin: 15% auto;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    width: 80%;
+    max-width: 500px;
+    position: relative;
 }
-#message-log-area ul { list-style-type: none; padding-left: 0; max-height: 150px; overflow-y: auto;}
-#message-log-area li { padding: 2px 0; border-bottom: 1px dashed #eee; }
+
+.modal.hidden {
+    display: none;
+}
+
+/* 遊戲開始後的樣式 */
+.game-started .modal {
+    display: none;
+}
+
+.player-info-modal.hidden {
+    display: none !important;
+}

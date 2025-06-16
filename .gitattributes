@@ -1,0 +1,12 @@
+# 設置所有文件使用 LF 換行符
+* text=auto eol=lf
+
+# 二進制文件不進行換行符轉換
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.zip binary
+*.pdf binary 

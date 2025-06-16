@@ -2,46 +2,45 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>我的骰子陷阱遊戲</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英文報告遊戲</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>骰子陷阱 HTML 版</h1>
-
     <div class="game-container">
-        <div id="game-board">
+        <div class="game-board">
+            <h2>遊戲路徑</h2>
+            <div id="game-path" class="game-path"></div>
+            <div class="controls">
+                <button id="roll-dice-btn" disabled>擲骰子</button>
+                <button id="reset-game-btn">重置遊戲</button>
+                <div id="reset-request-section">
+                    <p>有玩家請求重置遊戲，是否同意？</p>
+                    <button id="agree-reset-btn">同意</button>
+                    <button id="disagree-reset-btn">不同意</button>
+                </div>
             </div>
-
-        <div id="game-info">
-            <h2>遊戲資訊</h2>
-            <p>目前回合: <span id="turn-count">0</span></p>
-            <p>輪到玩家: <span id="current-player-display">-</span></p>
-            <label for="player-selector-dropdown">選擇行動玩家 (Select Player to Move):</label>
-    	    <select id="player-selector-dropdown">
-        	</select>
-
-            <p>骰子結果: <span id="dice-result-display">-</span></p>
-            <button id="roll-dice-button">擲骰子</button>
-            <button id="reset-game-button">重新開始</button>
+        </div>
+        
+        <div class="message-log">
+            <h2>訊息日誌</h2>
+            <ul id="message-log"></ul>
+            <h2>玩家列表</h2>
+            <ul id="player-list" class="player-list"></ul>
         </div>
     </div>
 
-    <div id="player-status-area">
-        <h2>玩家狀態</h2>
+    <!-- 玩家資訊彈窗 -->
+    <div id="player-info-modal" class="modal">
+        <div class="modal-content">
+            <h2>玩家資訊</h2>
+            <div id="player-id">未加入遊戲</div>
+            <input type="text" id="player-name-input" placeholder="輸入玩家名稱">
+            <button id="join-game-btn">加入遊戲</button>
+            <div id="player-info"></div>
         </div>
-
-    <div id="message-log-area">
-        <h2>遊戲訊息</h2>
-        <ul id="message-list">
-            </ul>
     </div>
 
-    <div id="ranking-area">
-        <h2>排行榜</h2>
-        <ol id="ranking-list">
-            </ol>
-    </div>
-
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="/static/script.js"></script>
 </body>
 </html>

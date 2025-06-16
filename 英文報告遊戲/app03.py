@@ -1,11 +1,12 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 import random
 import time # 為了模擬一些延遲，讓前端有時間反應，實際部署時可移除
+import uuid
 
 app = Flask(__name__)
 
 # --- 遊戲核心設定 (從 "原遊戲.py" 移植和整合) ---
-PATH_LENGTH = 15
+PATH_LENGTH = 21
 NUM_PLAYERS = 7  # TODO (可改進): 考慮讓玩家數量可以在遊戲開始前設定
 INITIAL_LIVES = 3
 INITIAL_TRAPS = 3
@@ -15,9 +16,12 @@ START_POSITION = 0
 END_POSITION = PATH_LENGTH - 1
 FINISHERS_NEEDED = 3 # 需要多少玩家到達終點才結束遊戲
 ENCOUNTER_BONUS_STEP = 1 # 遇到其他玩家時額外走的步數
+MAX_MESSAGES = 9
 
 # --- 全域遊戲狀態 ---
 game_data = {}
+player_cookies = {}  # 儲存玩家ID和cookie的對應關係
+reset_requests = set()  # 儲存同意重置的玩家ID
 
 def add_game_message(message_cn, message_en=""):
     """新增遊戲訊息到紀錄中，並限制長度"""
@@ -25,22 +29,23 @@ def add_game_message(message_cn, message_en=""):
     if message_en:
         full_message += f" ({message_en})"
     game_data["message_log"].append(full_message)
-    MAX_LOG_MESSAGES = 20 # TODO (可改進): 訊息長度可配置
-    if len(game_data["message_log"]) > MAX_LOG_MESSAGES:
-        game_data["message_log"] = game_data["message_log"][-MAX_LOG_MESSAGES:]
+    if len(game_data["message_log"]) > MAX_MESSAGES:
+        game_data["message_log"] = game_data["message_log"][-MAX_MESSAGES:]
     print(f"[GAME LOG] {full_message}") # 後端日誌，方便追蹤
 
 def initialize_player_data():
     """初始化玩家資料"""
     players = {}
-    for i in range(1, NUM_PLAYERS + 1):
+    for i in range(1, len(player_cookies) + 1):
         players[i] = {
-            'id': i, # 加入玩家ID本身，方便前端使用
+            'id': i,
+            'name': f'玩家 {i}',  # 預設名稱
             'position': START_POSITION,
             'lives': INITIAL_LIVES,
             'finished': False,
             'finish_turn': None,
-            'encounters': 0 # 新增遭遇次數
+            'encounters': 0,
+            'is_ready': False  # 玩家準備狀態
         }
     return players
 
@@ -138,10 +143,10 @@ def reset_game_state():
     game_data["finished_players_ranked"] = []
     game_data["turn_count"] = 1 # 遊戲開始算第一回合
     game_data["current_player_id"] = 1 # 預設從玩家1開始
-    game_data["message_log"] = [f"遊戲已重置！第 {game_data['turn_count']} 回合開始！新局開始！ (Game Reset! Turn {game_data['turn_count']} begins! New game starts!)"]
+    game_data["message_log"] = [f"遊戲已重置！等待玩家準備..."]
     game_data["message_log"].append(f"初始陷阱位置: {sorted(list(game_data['traps'])) if game_data['traps'] else '無'}")
-    game_data["message_log"].append(f"輪到玩家 {game_data['current_player_id']} 行動。")
     game_data["game_over"] = False
+    game_data["game_started"] = False # 遊戲開始狀態
     game_data["last_dice_roll"] = None
     # INFO: 這些額外資訊方便前端渲染
     game_data["path_length"] = PATH_LENGTH
@@ -151,7 +156,6 @@ def reset_game_state():
 
     print("--- Game state has been reset ---")
     print(f"Initial traps: {game_data['traps']}")
-    print(f"Turn: {game_data['turn_count']}, Current Player: {game_data['current_player_id']}")
     print("---------------------------------")
     
 import copy # 如果需要深拷貝，但這裡淺拷貝修改應該足夠
@@ -172,6 +176,13 @@ def prepare_data_for_json(original_data):
     #     data_to_send["some_other_set_field"] = list(data_to_send["some_other_set_field"])
     return data_to_send
 
+def get_player_id_from_cookie():
+    """從cookie中獲取玩家ID"""
+    cookie = request.cookies.get('player_id')
+    if cookie and cookie in player_cookies:
+        return player_cookies[cookie]
+    return None
+
 # --- Flask 路由 (API Endpoints) ---
 @app.route('/')
 def home():
@@ -179,95 +190,250 @@ def home():
     # INFO: 你需要在 templates 資料夾下建立一個 index.html 檔案
     return render_template('index.html') # 前端需要自行實作
 
+@app.route('/join_game', methods=['POST'])
+def join_game():
+    """新玩家加入遊戲"""
+    cookie = request.cookies.get('player_id')
+    
+    # 如果已經有cookie且是已註冊的玩家
+    if cookie and cookie in player_cookies:
+        return jsonify({"player_id": player_cookies[cookie]})
+    
+    # 生成新的cookie
+    new_cookie = str(uuid.uuid4())
+    player_id = len(player_cookies) + 1
+    player_cookies[new_cookie] = player_id
+    
+    # 如果遊戲還沒開始，新增新玩家資料
+    if not game_data.get("game_started", False):
+        if "players" not in game_data:
+            game_data["players"] = {}
+        game_data["players"][player_id] = {
+            'id': player_id,
+            'name': f'玩家 {player_id}',
+            'position': START_POSITION,
+            'lives': INITIAL_LIVES,
+            'finished': False,
+            'finish_turn': None,
+            'encounters': 0,
+            'is_ready': False
+        }
+        add_game_message(f"新玩家 {player_id} 加入了遊戲！")
+    
+    response = make_response(jsonify({"player_id": player_id}))
+    response.set_cookie('player_id', new_cookie, max_age=86400)  # cookie有效期24小時
+    return response
+
 @app.route('/get_state', methods=['GET'])
 def get_state():
     """提供目前的遊戲完整狀態給前端"""
-    # TODO (可改進): 可以考慮只傳送自上次請求以來發生變化的部分，以減少傳輸量，但這會增加複雜性。
-    return jsonify(prepare_data_for_json(game_data))
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+    
+    data = prepare_data_for_json(game_data)
+    data["current_player_id"] = player_id
+    return jsonify(data)
+
+@app.route('/get_current_player', methods=['GET'])
+def get_current_player():
+    if not game_data.get("game_started", False):
+        return jsonify({'current_player_id': None})
+    
+    current_player_id = game_data.get("current_player_id")
+    if current_player_id and current_player_id in game_data["players"]:
+        current_player = game_data["players"][current_player_id]
+        return jsonify({
+            'current_player_id': current_player_id,
+            'player_name': current_player['name']
+        })
+    return jsonify({'current_player_id': None})
 
 @app.route('/roll_dice', methods=['POST'])
-def roll_dice_action():
-    global game_data
+def roll_dice():
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({'error': '未找到玩家ID'}), 400
+
+    # 簡化擲骰子條件：只有當前回合的玩家可以擲骰子
+    if game_data["current_player_id"] != player_id:
+        return jsonify({'error': '不是你的回合'}), 400
 
     if game_data["game_over"]:
-        add_game_message("遊戲已經結束了。 (The game is already over.)")
-        return jsonify(prepare_data_for_json(game_data))
+        return jsonify({'error': '遊戲已結束'}), 400
 
-    request_data = request.json
-    if not request_data or 'player_id' not in request_data:
-        add_game_message("錯誤：請求中未指定玩家 ID。 (Error: Player ID not specified in request.)")
-        return jsonify(prepare_data_for_json({"error": "Player ID missing"})), 400
+    if not game_data.get("game_started", False):
+        return jsonify({'error': '遊戲尚未開始'}), 400
 
-    try:
-        player_id_to_move = int(request_data['player_id'])
-    except ValueError:
-        add_game_message("錯誤：玩家 ID 格式不正確。 (Error: Invalid Player ID format.)")
-        return jsonify(prepare_data_for_json({"error": "Invalid Player ID format"})), 400
+    player = game_data["players"][player_id]
+    if player['finished']:
+        return jsonify({'error': '你已經完成遊戲'}), 400
 
-    if player_id_to_move not in game_data["players"]:
-        add_game_message(f"錯誤：無效的玩家 ID {player_id_to_move}。 (Error: Invalid Player ID {player_id_to_move}.)")
-        return jsonify(prepare_data_for_json({"error": f"Invalid Player ID {player_id_to_move}"})), 400
+    # 1. 擲骰子
+    dice_result = random.randint(1, 6)
+    old_position = player['position']
+    add_game_message(f"{player['name']} 擲出 {dice_result} 點")
 
-    if game_data["players"][player_id_to_move]['finished']:
-        add_game_message(f"玩家 {player_id_to_move} 已經完成遊戲，不能再移動。 (Player {player_id_to_move} has finished and cannot move.)")
-        return jsonify(prepare_data_for_json(game_data))
-
-    # 更新當前玩家 ID
-    game_data["current_player_id"] = player_id_to_move
-    add_game_message(f"輪到玩家 {player_id_to_move} 行動。 (Player {player_id_to_move}'s turn.)")
-
-    # 擲骰子
-    dice_roll = random.randint(1, 6)
-    game_data["last_dice_roll"] = dice_roll
-    add_game_message(f"玩家 {player_id_to_move} 擲出 {dice_roll} 點。 (Player {player_id_to_move} rolled {dice_roll}.)")
-
-    # 如果骰到六點，更新陷阱位置
-    if dice_roll == 6:
-        num_new_traps = random.randint(MIN_NEW_TRAPS, MAX_NEW_TRAPS)
-        new_traps = generate_new_traps(num_new_traps, PATH_LENGTH, START_POSITION, END_POSITION)
-        game_data["traps"] = new_traps
-        add_game_message(f"骰到六點！生成 {num_new_traps} 個新陷阱。 (Rolled a six! Generated {num_new_traps} new traps.)")
-        add_game_message(f"新陷阱位置: {sorted(list(new_traps)) if new_traps else '無'} (New trap positions: {sorted(list(new_traps)) if new_traps else 'none'})")
-        check_players_on_new_traps_web()  # 檢查是否有玩家在新陷阱上
-
-    # 移動玩家
-    current_position = game_data["players"][player_id_to_move]["position"]
-    new_position = min(current_position + dice_roll, game_data["path_length"] - 1)
-    game_data["players"][player_id_to_move]["position"] = new_position
-
-    # 檢查是否踩到陷阱
-    if new_position in game_data["traps"]:
-        game_data["players"][player_id_to_move]["lives"] -= 1
-        add_game_message(f"玩家 {player_id_to_move} 踩到陷阱！失去一條生命。 (Player {player_id_to_move} hit a trap! Lost one life.)")
-        if game_data["players"][player_id_to_move]["lives"] <= 0:
-            add_game_message(f"玩家 {player_id_to_move} 生命值歸零！ (Player {player_id_to_move} has no lives left!)")
+    # 2. 計算初始新位置
+    new_position = min(old_position + dice_result, game_data["path_length"] - 1)
+    
+    # 3. 重複檢查是否遇到其他玩家，直到沒有遇到人為止
+    while True:
+        encountered_players = []
+        for other_id, other_player in game_data["players"].items():
+            if other_id != player_id and other_player['position'] == new_position and not other_player['finished']:
+                encountered_players.append(other_player)
         
-        # 立即將玩家位置更新為起點
-        game_data["players"][player_id_to_move]["position"] = START_POSITION
-        add_game_message(f"玩家 {player_id_to_move} 回到起點位置 {START_POSITION}。 (Player {player_id_to_move} returns to start position {START_POSITION}.)")
+        if not encountered_players:
+            break  # 如果沒有遇到人，跳出循環
+            
+        # 遇到其他玩家，額外移動一格
+        new_position = min(new_position + ENCOUNTER_BONUS_STEP, game_data["path_length"] - 1)
+        player_names = [p['name'] for p in encountered_players]
+        add_game_message(f"{player['name']} 遇到 {', '.join(player_names)}，額外移動一格！")
+        
+        # 如果已經到達終點，就不需要再檢查了
+        if new_position >= game_data["path_length"] - 1:
+            break
 
-    # 檢查是否到達終點
-    if new_position == game_data["path_length"] - 1:
-        game_data["players"][player_id_to_move]["finished"] = True
-        game_data["players"][player_id_to_move]["finish_turn"] = game_data["turn_count"]
-        game_data["finished_players_ranked"].append(player_id_to_move)
-        add_game_message(f"玩家 {player_id_to_move} 到達終點！ (Player {player_id_to_move} reached the finish!)")
+    # 4. 更新位置並顯示移動訊息
+    player['position'] = new_position
+    add_game_message(f"{player['name']} 移動到位置 {new_position}")
 
-        # 檢查是否達到結束條件
-        if len(game_data["finished_players_ranked"]) >= game_data["finishers_needed"]:
-            game_data["game_over"] = True
-            add_game_message("遊戲結束！達到所需完成人數。 (Game Over! Required number of finishers reached.)")
+    # 5. 檢查是否踩到陷阱
+    if new_position in game_data["traps"]:
+        player['lives'] -= 1
+        add_game_message(f"{player['name']} 踩到陷阱，失去一條生命！")
+        # 踩到陷阱後回到起點
+        player['position'] = START_POSITION
+        add_game_message(f"{player['name']} 回到起點！")
+        if player['lives'] <= 0:
+            player['finished'] = True
+            add_game_message(f"{player['name']} 失去所有生命，遊戲結束！")
 
-    # 更新回合數
-    game_data["turn_count"] += 1
-    add_game_message(f"--- 第 {game_data['turn_count']} 回合開始 ---", f"--- Turn {game_data['turn_count']} begins ---")
+    # 6. 檢查是否到達終點
+    if player['position'] >= game_data["path_length"] - 1:
+        player['finished'] = True
+        add_game_message(f"{player['name']} 到達終點！")
+
+    # 7. 檢查遊戲是否結束
+    active_players = [p for p in game_data["players"].values() if not p['finished']]
+    if len(active_players) <= 1:
+        game_data["game_over"] = True
+        if len(active_players) == 1:
+            winner = active_players[0]
+            add_game_message(f"遊戲結束！{winner['name']} 獲勝！")
+        else:
+            add_game_message("遊戲結束！沒有玩家獲勝！")
+
+    # 8. 切換到下一個玩家
+    if not game_data["game_over"]:
+        player_ids = list(game_data["players"].keys())
+        current_index = player_ids.index(player_id)
+        next_index = (current_index + 1) % len(player_ids)
+        while game_data["players"][player_ids[next_index]]['finished']:
+            next_index = (next_index + 1) % len(player_ids)
+        game_data["current_player_id"] = player_ids[next_index]
+        next_player = game_data["players"][player_ids[next_index]]
+        add_game_message(f"輪到 {next_player['name']} 行動")
 
     return jsonify(prepare_data_for_json(game_data))
 
-@app.route('/reset', methods=['POST'])
-def reset_action():
-    """重置遊戲"""
-    reset_game_state()
+@app.route('/set_player_name', methods=['POST'])
+def set_player_name():
+    """設定玩家名稱"""
+    if game_data["game_over"]:
+        return jsonify({"error": "遊戲已結束"}), 400
+
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+
+    # 檢查玩家是否已準備
+    if game_data["players"][player_id]['is_ready']:
+        return jsonify({"error": "已準備的玩家不能修改名稱"}), 400
+
+    request_data = request.json
+    if not request_data or 'name' not in request_data:
+        return jsonify({"error": "缺少必要參數"}), 400
+
+    new_name = request_data['name'].strip()
+    if not new_name:
+        return jsonify({"error": "名稱不能為空"}), 400
+
+    game_data["players"][player_id]['name'] = new_name
+    add_game_message(f"玩家 {player_id} 將名稱改為：{new_name}")
+    return jsonify(prepare_data_for_json(game_data))
+
+@app.route('/set_ready', methods=['POST'])
+def set_ready():
+    """設定玩家準備狀態"""
+    if game_data["game_over"]:
+        return jsonify({"error": "遊戲已結束"}), 400
+
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+
+    player = game_data["players"][player_id]
+    player['is_ready'] = not player['is_ready']  # 切換準備狀態
+    
+    if player['is_ready']:
+        add_game_message(f"{player['name']} 已準備好開始遊戲！")
+    else:
+        add_game_message(f"{player['name']} 取消準備。")
+
+    # 檢查是否所有玩家都已準備
+    all_ready = all(p['is_ready'] for p in game_data["players"].values())
+    if all_ready and len(game_data["players"]) >= 2:  # 至少需要2個玩家
+        add_game_message("所有玩家都已準備好，遊戲開始！")
+        game_data["game_started"] = True
+        game_data["current_player_id"] = 1
+
+    return jsonify(prepare_data_for_json(game_data))
+
+@app.route('/request_reset', methods=['POST'])
+def request_reset():
+    """請求重置遊戲"""
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+
+    # 清除之前的重置請求
+    reset_requests.clear()
+    # 將請求者加入同意列表
+    reset_requests.add(player_id)
+    add_game_message(f"{game_data['players'][player_id]['name']} 請求重置遊戲")
+
+    return jsonify({"reset_requested": True, **prepare_data_for_json(game_data)})
+
+@app.route('/agree_reset', methods=['POST'])
+def agree_reset():
+    """玩家同意重置遊戲"""
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+
+    reset_requests.add(player_id)
+    add_game_message(f"{game_data['players'][player_id]['name']} 同意重置遊戲")
+
+    # 檢查是否所有玩家都同意重置
+    if len(reset_requests) == len(game_data["players"]):
+        reset_game_state()
+        reset_requests.clear()
+        return jsonify({"reset_complete": True, **prepare_data_for_json(game_data)})
+    
+    return jsonify({"reset_complete": False, **prepare_data_for_json(game_data)})
+
+@app.route('/disagree_reset', methods=['POST'])
+def disagree_reset():
+    """玩家不同意重置遊戲"""
+    player_id = get_player_id_from_cookie()
+    if not player_id:
+        return jsonify({"error": "請先加入遊戲"}), 401
+
+    add_game_message(f"{game_data['players'][player_id]['name']} 不同意重置遊戲")
+    reset_requests.clear()
     return jsonify(prepare_data_for_json(game_data))
 
 # --- 主程式入口 ---
